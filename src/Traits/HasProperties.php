@@ -12,45 +12,88 @@ trait HasProperties
     public function properties()
     {
         return $this->morphToMany(config('properties.model', \Properties\Models\Property::class), 'propertyable')
+                    ->using(\Properties\Models\Propertyable::class)
                     ->withPivot('value');
     }
 
     /**
      * A simplified alias for attaching a property with a custom value.
      *
+     * @param mixed $property
+     * @param mixed $value
+     *
      * @return \Properties\Models\Property
      */
-    public function attachProperty($propertyKey, $value = null)
+    public function attachProperty($property, $value = null)
     {
-        $model = config('properties.model', \Properties\Models\Property::class);
-        $property = $model::find($propertyKey);
+        $class = config('properties.model', \Properties\Models\Property::class);
 
-        if (!$property) {
-            throw new \Exception("Property '{$propertyKey}' not found");
+        if (!($property instanceof $class)) {
+            if (is_string($property)) {
+                $property = $class::where('id', $property)->orWhere('name', $property)->first();
+            } else {
+                $property = $class::find($property);
+            }
         }
 
-        if ($property->type == 'JSON' || $property->type == 'SCHEMA') {
-            if (!is_null($value) && !is_array($value)) {
-                throw new \Exception("Property '{$propertyKey}' requires its value to be an array");
-            }
+        if (!$property) {
+            throw new \Exception('Property not found');
+        }
 
-            if ($property->type == 'SCHEMA') {
-                $originalProps = collect($property->default)->keyBy('key');
-                $requiredParams = $originalProps->keys();
-                $defaultValues = $originalProps->all();
-
-                foreach ($requiredParams as $key) {
-                    if (!isset($value[$key])) {
-                        $value[$key] = $defaultValues[$key]->default;
-                    }
-                }
-            }
-
+        if ($property->type == 'JSON' && !is_string($value)) {
             $value = json_encode($value);
         }
 
-        $this->properties()->attach($propertyKey, ['value' => $value]);
+        $this->properties()->attach($property->id, ['value' => $value]);
 
         return $this;
+    }
+
+    /**
+     * A simplified alias for detaching a property.
+     *
+     * @param mixed $property
+     *
+     * @return bool
+     */
+    public function detachProperty($property)
+    {
+        $class = config('properties.model', \Properties\Models\Property::class);
+
+        if (!($property instanceof $class)) {
+            if (is_string($property)) {
+                $property = $class::where('id', $property)->orWhere('name', $property)->first();
+            } else {
+                $property = $class::find($property);
+            }
+        }
+
+        if ($property) {
+            return $this->properties()->detach($property->id);
+        }
+
+        return false;
+    }
+
+    /**
+     * Returns the first association of the provided property name with
+     * casted values.
+     *
+     * @param string $name
+     * @param bool   $toArray
+     *
+     * @return mixed
+     */
+    public function property($name, $jsonToObject = true)
+    {
+        $property = $this->properties()->where('name', $name)->first();
+
+        $value = $property->value ?? null;
+
+        if ($value && $jsonToObject && $property->type == 'JSON') {
+            $value = json_decode($value);
+        }
+
+        return $value;
     }
 }
